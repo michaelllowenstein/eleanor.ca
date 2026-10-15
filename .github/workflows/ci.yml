@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  api:
+    name: API · typecheck, test, build, migrate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: eleanor_test
+          POSTGRES_USER: eleanor
+          POSTGRES_PASSWORD: eleanor
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eleanor -d eleanor_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://eleanor:eleanor@localhost:5432/eleanor_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck -w @eleanor/api
+      - run: npm test -w @eleanor/api
+      - run: npm run build -w @eleanor/api
+      - name: Production migrator runs from dist/ (pre-deploy hook smoke test)
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: |
+          npm run migrate:prod -w @eleanor/api
+          npm run migrate:prod -w @eleanor/api   # second run must be a no-op
+
+  client:
+    name: Client · test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test -w @eleanor/client
+      - run: npm run build -w @eleanor/client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist/eleanor/browser
+          retention-days: 7
+
+  e2e:
+    name: E2E · Chromium
+    runs-on: ubuntu-latest
+    needs: [client]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7

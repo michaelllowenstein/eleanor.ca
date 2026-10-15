@@ -1,38 +1,21 @@
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version TEXT PRIMARY KEY,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    subject_hash TEXT NOT NULL UNIQUE,
-    realtime_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- 001: assistant profile storage.
+--
+-- The pre-release version of this file referenced columns that never existed
+-- (assistant_profiles.id, assistant_profiles.is_active) and therefore always
+-- failed inside its transaction. It was never successfully applied anywhere,
+-- so it is safe to correct in place. Users and ownership constraints are
+-- introduced in 004 so that databases created by the v0.7 snapshot (which had
+-- these tables but no schema_migrations rows) converge to the same schema.
+
 CREATE TABLE IF NOT EXISTS assistant_profiles (
-    id UUID PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(40) NOT NULL,
-    settings JSONB NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT FALSE,
-    version INTEGER NOT NULL DEFAULT 1,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT assistant_profiles_name_not_blank CHECK (LENGTH(TRIM(name)) > 0),
-    CONSTRAINT assistant_profiles_settings_object CHECK (jsonb_typeof(settings) = 'object')
+    user_id        TEXT        PRIMARY KEY,
+    profile_metric BIGINT      NOT NULL,
+    schema_version SMALLINT    NOT NULL DEFAULT 1,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT assistant_profiles_schema_version_positive
+        CHECK (schema_version > 0)
 );
-CREATE INDEX IF NOT EXISTS idx_assistant_profiles_user ON assistant_profiles(user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_profiles_one_active ON assistant_profiles(user_id)
-WHERE is_active = TRUE;
-CREATE TABLE IF NOT EXISTS assistant_sessions (
-    id UUID PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    profile_id UUID REFERENCES assistant_profiles(id) ON DELETE
-    SET NULL,
-        provider VARCHAR(32) NOT NULL,
-        model VARCHAR(128) NOT NULL,
-        status VARCHAR(32) NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        ended_at TIMESTAMPTZ
-);
-CREATE INDEX IF NOT EXISTS idx_assistant_sessions_user_created ON assistant_sessions(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS assistant_profiles_updated_at_idx
+    ON assistant_profiles (updated_at);

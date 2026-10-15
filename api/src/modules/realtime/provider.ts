@@ -2,18 +2,51 @@ import { createHash } from "node:crypto";
 
 import type {
   DecodedAssistantProfile,
-} from "../profile/profile-metric.js";
+} from "../profile/metric.js";
 
-export function createOpenAIRealtimeProvider(apiKey: string) {
+export interface RealtimeCallRequest {
+  readonly sdp: string;
+  readonly userId: string;
+  readonly profile: DecodedAssistantProfile;
+}
+
+export interface RealtimeProvider {
+  /** Exchanges a browser SDP offer for the provider's SDP answer. */
+  createCall(request: RealtimeCallRequest): Promise<string>;
+}
+
+export type RealtimeProviderFactory = (apiKey: string) => RealtimeProvider;
+
+/** Raised when the upstream provider rejects or fails the call. */
+export class RealtimeProviderError extends Error {
+  constructor(
+    readonly upstreamStatus: number,
+    readonly code:
+      | "PROVIDER_AUTH_FAILED"
+      | "PROVIDER_RATE_LIMITED"
+      | "PROVIDER_UNAVAILABLE"
+      | "PROVIDER_BAD_RESPONSE",
+  ) {
+    super(`Realtime provider rejected session (${upstreamStatus}, ${code}).`);
+    this.name = "RealtimeProviderError";
+  }
+}
+
+export function createOpenAIRealtimeProviderFactory(
+  model: string,
+): RealtimeProviderFactory {
+  return (apiKey) => createOpenAIRealtimeProvider(apiKey, model);
+}
+
+export function createOpenAIRealtimeProvider(
+  apiKey: string,
+  model: string,
+): RealtimeProvider {
   return {
-    async createCall(request: {
-      readonly sdp: string;
-      readonly userId: string;
-      readonly profile: DecodedAssistantProfile;
-    }): Promise<string> {
+    async createCall(request) {
       const session = {
         type: "realtime",
-        model: "gpt-realtime-2.1",
+        model,
         output_modalities: ["audio"],
         instructions: `
 You are Eleanor, a realtime personal AI assistant.
@@ -75,10 +108,19 @@ succeeded unless a trusted tool confirms it.
 
       const answer = await upstream.text();
 
-      if (!upstream.ok || !answer.trim().startsWith("v=0")) {
-        throw new Error(
-          `Realtime provider rejected session (${upstream.status}).`,
+      if (!upstream.ok) {
+        throw new RealtimeProviderError(
+          upstream.status,
+          upstream.status === 401 || upstream.status === 403
+            ? "PROVIDER_AUTH_FAILED"
+            : upstream.status === 429
+              ? "PROVIDER_RATE_LIMITED"
+              : "PROVIDER_UNAVAILABLE",
         );
+      }
+
+      if (!answer.trim().startsWith("v=0")) {
+        throw new RealtimeProviderError(upstream.status, "PROVIDER_BAD_RESPONSE");
       }
 
       return answer;

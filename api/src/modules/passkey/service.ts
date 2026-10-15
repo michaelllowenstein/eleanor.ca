@@ -13,7 +13,7 @@ import type {
 
 import { SessionService } from "../auth/session/service.js";
 import type { SessionContext } from "../auth/session/types.js";
-import type { PasskeyRepository } from "../passkey/repository.js";
+import type { PasskeyRepository } from "./repository.js";
 
 const CEREMONY_TTL_MS = 5 * 60 * 1_000;
 
@@ -26,6 +26,8 @@ export class PasskeyService {
       readonly rpName: string;
       readonly expectedOrigin: string;
       readonly enrollmentMaxOidcAgeSeconds: number;
+      /** Must match the window enforced by requireRecentStepUp(). */
+      readonly stepUpTtlSeconds: number;
     },
   ) {}
 
@@ -176,7 +178,7 @@ export class PasskeyService {
     const options = await generateAuthenticationOptions({
       rpID: this.config.rpId,
       userVerification: "required",
-      allowCredentials: passkeys.map((passkey: { credentialId: any; transports: any; }) => ({
+      allowCredentials: passkeys.map((passkey) => ({
         id: passkey.credentialId,
         transports: [...passkey.transports],
       })),
@@ -311,7 +313,7 @@ export class PasskeyService {
 
     return Boolean(
       verifiedAt &&
-      Date.now() - verifiedAt <= CEREMONY_TTL_MS,
+      Date.now() - verifiedAt <= this.config.stepUpTtlSeconds * 1_000,
     );
   }
 }

@@ -9,7 +9,7 @@ export interface StoredPasskey {
   readonly userId: string;
   readonly publicKey: Buffer;
   readonly counter: number;
-  readonly transports: readonly AuthenticatorTransport[];
+  readonly transports: readonly AuthenticatorTransport[] | string[];
   readonly deviceType: CredentialDeviceType;
   readonly backedUp: boolean;
   readonly name: string | null;

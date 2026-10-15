@@ -1,4 +1,5 @@
-import { contextBridge } from 'electron';
+// Sandboxed preload scripts cannot be ES modules, so this file is CommonJS.
+const { contextBridge } = require('electron');
 
 contextBridge.exposeInMainWorld('eleanor', {
   platform: process.platform,

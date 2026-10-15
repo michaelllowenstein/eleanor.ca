@@ -1,0 +1,57 @@
+# Local development dependencies for Eleanor.
+#   npm run db:up      start everything and wait for health checks
+#   npm run db:reset   wipe volumes (destroys local data)
+services:
+  postgres:
+    image: postgres:17
+    container_name: eleanor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eleanor
+      POSTGRES_USER: eleanor
+      POSTGRES_PASSWORD: eleanor
+    ports:
+      - "5433:5433"
+    volumes:
+      - eleanor-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eleanor -d eleanor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: eleanor-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - eleanor-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local OpenID Connect provider. Development only — it signs in whoever
+  # types a username on its login form. Issuer: http://localhost:8080/eleanor
+  oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    container_name: eleanor-oidc
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8080"
+      JSON_CONFIG: >-
+        {"interactiveLogin": true,
+         "tokenCallbacks": [{"issuerId": "eleanor", "tokenExpiry": 3600,
+           "requestMappings": [{"requestParam": "scope", "match": "*",
+             "claims": {"name": "Michael Lowenstein", "email": "iam@miloseng.com",
+                        "email_verified": true, "amr": ["pwd"]}}]}]}
+    ports:
+      - "8080:8080"
+
+volumes:
+  eleanor-postgres:
+  eleanor-redis:

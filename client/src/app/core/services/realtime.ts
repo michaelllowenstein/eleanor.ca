@@ -8,6 +8,7 @@ import {
 import {
   AudioLevelsService,
 } from "./audio";
+import { AuthService } from "./auth";
 
 import {
   AssistantSettingsService,
@@ -23,10 +24,11 @@ import type {
   providedIn: "root"
 })
 export class RealtimeVoiceService {
-  private readonly settings =
+  private readonly auth: AuthService = inject(AuthService);
+  private readonly settings: AssistantSettingsService =
     inject(AssistantSettingsService);
 
-  private readonly audioLevels =
+  private readonly audioLevels: AudioLevelsService =
     inject(AudioLevelsService);
 
   readonly state =
@@ -419,20 +421,16 @@ export class RealtimeVoiceService {
       "Establishing realtime connection…",
     );
 
-    const response =
-      await fetch(
-        "/api/realtime/session",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/sdp"
-          },
-
-          body: offer.sdp
-        },
-      );
+    const response = await fetch("/api/realtime/session", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/sdp",
+        "X-Eleanor-Profile-Metric": String(this.settings.profileMetric()),
+        ...this.auth.csrfHeaders(),
+      },
+      body: offer.sdp,
+    });
 
     if (!response.ok) {
       let message =

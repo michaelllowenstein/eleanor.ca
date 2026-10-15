@@ -1,7 +1,6 @@
 import * as oidc from "openid-client";
 
 import type {
-  EleanorSession,
   EleanorUser,
   OidcTransaction,
 } from "../session/types.js";
@@ -24,7 +23,17 @@ export interface CompletedAuthentication {
   readonly idTokenHint?: string;
 }
 
-export class OidcService {
+/** The subset of OidcService the routes depend on (replaceable in tests). */
+export interface OidcClient {
+  begin(
+    returnTo: string,
+    options?: { readonly forceReauthentication?: boolean },
+  ): Promise<{ readonly transaction: OidcTransaction; readonly authorizationUrl: URL }>;
+  complete(callbackUrl: URL, transaction: OidcTransaction): Promise<CompletedAuthentication>;
+  logoutUrl(idTokenHint?: string): string | null;
+}
+
+export class OidcService implements OidcClient {
   private constructor(
     private readonly configuration: oidc.Configuration,
 
@@ -32,18 +41,28 @@ export class OidcService {
   ) {}
 
   static async create(config: OidcServiceConfig): Promise<OidcService> {
+    const issuer = new URL(config.issuer);
+    const insecure = issuer.protocol === "http:";
+
+    if (insecure && process.env.NODE_ENV === "production") {
+      throw new Error("OIDC_ISSUER must use HTTPS in production.");
+    }
+
     const configuration = await oidc.discovery(
-      new URL(config.issuer),
-
+      issuer,
       config.clientId,
-
       config.clientSecret,
+      undefined,
+      insecure ? { execute: [oidc.allowInsecureRequests] } : undefined,
     );
 
     return new OidcService(configuration, config);
   }
 
-  async begin(returnTo: string): Promise<{
+  async begin(
+    returnTo: string,
+    options: { readonly forceReauthentication?: boolean } = {},
+  ): Promise<{
     readonly transaction: OidcTransaction;
 
     readonly authorizationUrl: URL;
@@ -78,6 +97,12 @@ export class OidcService {
       state,
 
       nonce,
+
+      // Used when the server needs a *fresh* identity-provider login, e.g.
+      // first-passkey enrolment after PASSKEY_ENROLLMENT_MAX_OIDC_AGE_SECONDS.
+      ...(options.forceReauthentication
+        ? { prompt: "login", max_age: "0" }
+        : {}),
     });
 
     return {
